@@ -1,37 +1,50 @@
 name: CI
 
-on: [ push ]
+on:
+  push:
+    branches:
+      - master
 
 jobs:
+  extract-versions:
+    uses: ./.github/workflows/extract-versions.yml
+
   lint:
+    needs: [ extract-versions ]
     uses: ./.github/workflows/lint.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
 
   build:
-    needs: [ lint ]
+    needs: [ lint, extract-versions ]
     uses: ./.github/workflows/build.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
 
   validate-build:
-    needs: [ build ]
+    needs: [ build, extract-versions ]
     permissions:
       contents: read
       actions: read
 
     uses: ./.github/workflows/validate-build.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   docker:
-    needs: [ validate-build ]
+    needs: [ validate-build, extract-versions ]
     runs-on: ubuntu-latest
     permissions:
       packages: write
 
     steps:
-      - name: Download Build Directory
+      - name: Download Src Directory
         uses: actions/download-artifact@v4
         with:
-          name: build-dir
+          name: src
 
       - name: Download Dockerfile
         uses: actions/download-artifact@v4
@@ -50,7 +63,8 @@ jobs:
 
       - name: Get Dockerhub Tag
         run: |
-          dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${{ env.APP_VERSION }}"
+          app_version="${{ needs.extract-versions.outputs.APP_VERSION }}"
+          dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${app_version}"
           echo "Dockerhub Tag: ${dockerhub_tag}"
           echo "DOCKERHUB_TAG=${dockerhub_tag}" >> "$GITHUB_ENV"
 

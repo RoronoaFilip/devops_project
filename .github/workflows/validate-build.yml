@@ -1,4 +1,4 @@
-name: test
+name: validate-build
 
 on:
   workflow_call:
@@ -7,6 +7,12 @@ on:
         required: true
       SNYK_TOKEN:
         required: true
+    inputs:
+      PYTHON_VERSION:
+        required: true
+        type: string
+        description: "Python version to use"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -20,26 +26,43 @@ jobs:
       - name: Set up Python environment
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: ${{ inputs.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m unittest app_test.py
+        run: |
+          python -m coverage run -m unittest discover -p '*_test.py'
+          python -m coverage xml -o coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
 
   sonar-cloud:
     runs-on: ubuntu-latest
+    needs: [ test ]
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
 
       - name: SonarCloud Scan
         uses: sonarsource/sonarcloud-github-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_REF: ${{ github.ref }}
+        with:
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml
 
   snyk:
     runs-on: ubuntu-latest
@@ -53,7 +76,7 @@ jobs:
       - name: Set up Python environment
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ inputs.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -72,7 +95,6 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   database_test:
-    needs: [ test, sonar-cloud, snyk ]
     runs-on: ubuntu-latest
     services:
       postgres:
