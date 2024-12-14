@@ -1,0 +1,103 @@
+name: test
+
+on:
+  workflow_call:
+    secrets:
+      SONAR_TOKEN:
+        required: true
+      SNYK_TOKEN:
+        required: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: src
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m unittest app_test.py
+
+  sonar-cloud:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: SonarCloud Scan
+        uses: sonarsource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_REF: ${{ github.ref }}
+
+  snyk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: src
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Snyk
+        run: npm install snyk@latest
+
+      - name: Snyk test
+        run: npx snyk test --file=requirements.txt
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  database_test:
+    needs: [ test, sonar-cloud, snyk ]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_DB: db
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Download sql artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sql
+
+      - name: Run migrations test
+        uses: joshuaavalon/flyway-action@v3.0.0
+        with:
+          url: jdbc:postgresql://postgres:5432/db
+          user: user
+          password: password
+
+      - run: echo 'testing'

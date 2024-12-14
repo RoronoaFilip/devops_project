@@ -1,0 +1,37 @@
+name: build
+
+on: workflow_call
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -r src/requirements.txt
+
+      - name: Upload src artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: src
+          path: ./src
+
+      - name: Upload Dockerfile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dockerfile
+          path: ./Dockerfile
+
+      - name: Upload sql artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql
+          path: ./sql

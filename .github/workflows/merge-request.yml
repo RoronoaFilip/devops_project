@@ -1,0 +1,24 @@
+name: Merge Request CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  build:
+    needs: [lint]
+    uses: ./.github/workflows/build.yml
+
+  validate-build:
+    needs: [build]
+    permissions:
+      contents: read
+      actions: read
+
+    uses: ./.github/workflows/validate-build.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
