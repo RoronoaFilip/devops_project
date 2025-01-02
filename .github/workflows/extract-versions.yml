@@ -1,0 +1,46 @@
+name: extract-versions
+
+on:
+  workflow_call:
+    outputs:
+      PYTHON_VERSION:
+        description: "Python version to use"
+        value: ${{ jobs.extract-python-version.outputs.PYTHON_VERSION }}
+      APP_VERSION:
+        description: "App version to use"
+        value: ${{ jobs.extract-app-version.outputs.APP_VERSION }}
+
+jobs:
+  extract-app-version:
+    runs-on: ubuntu-latest
+
+    outputs:
+      APP_VERSION: ${{ steps.extract_app_version.outputs.APP_VERSION }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract app version
+        id: extract_app_version
+        run: |
+          app_version=$(grep '^version=' "./project.properties" | cut -d'=' -f2)
+          echo "App Version: ${app_version}"
+          echo "APP_VERSION=${app_version}" >> "$GITHUB_OUTPUT"
+
+  extract-python-version:
+    runs-on: ubuntu-latest
+
+    outputs:
+      PYTHON_VERSION: ${{ steps.extract_python_version.outputs.PYTHON_VERSION }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract python version
+        id: extract_python_version
+        run: |
+          python_version=$(grep '^python\.version=' "./project.properties" | cut -d'=' -f2)
+          echo "Python Version: ${python_version}"
+          echo "PYTHON_VERSION=${python_version}" >> "$GITHUB_OUTPUT"

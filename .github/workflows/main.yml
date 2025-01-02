@@ -4,8 +4,22 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Select an action'
+        required: true
+        default: 'deploy'
+        options:
+          - deploy
+          - terminate
 
 jobs:
+
+  extract-versions:
+    if: github.event.inputs.action != 'terminate'
+    uses: ./.github/workflows/extract-versions.yml
+
   lint:
     uses: ./.github/workflows/lint.yml
 
@@ -25,7 +39,7 @@ jobs:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   docker:
-    needs: [ validate-build ]
+    needs: [ extract-versions, validate-build ]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -53,10 +67,11 @@ jobs:
 
       - name: Get Dockerhub Tag
         run: |
-          dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${{ env.APP_VERSION }}"
+          app_version="${{ needs.extract-versions.outputs.APP_VERSION }}"
+          dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${app_version}"
+
           echo "Dockerhub Tag: ${dockerhub_tag}"
           echo "DOCKERHUB_TAG=${dockerhub_tag}" >> "$GITHUB_ENV"
-          echo "DOCKERHUB_TAG=${dockerhub_tag}" >> "$GITHUB_WORKSPACE/dockerhub_tag.txt"
 
       - name: Build and push
         uses: docker/build-push-action@v2
@@ -71,11 +86,14 @@ jobs:
 
   deploy:
     if: github.event.inputs.action == 'deploy' # Run only if 'deploy' is selected
+    needs: [ docker, extract-versions ]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
@@ -88,10 +106,11 @@ jobs:
         run: |
           echo "Creating SSH key pair file..."
 
-          echo "${{ secrets.EC2_KEY_PAIR }}" > my-key-pair.pem
-          chmod 400 my-key-pair.pem
+          echo "${{ secrets.EC2_KEY_PAIR }}" > "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
+          chmod 400 "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
 
           echo "SSH key pair file created."
+          stat "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
 
       - name: Start EC2 Instance
         id: ec2
@@ -101,24 +120,32 @@ jobs:
           INSTANCE_ID=$(aws ec2 run-instances \
             --image-id ${{ secrets.AWS_AMI_ID }} \
             --count 1 \
-            --instance-type t2.micro \
-            --key-name my-key-pair \
+            --instance-type ${{ secrets.EC2_INSTANCE_TYPE }} \
+            --key-name ${{ secrets.EC2_KEY_PAIR_NAME }} \
             --security-group-ids ${{ secrets.AWS_SECURITY_GROUP_ID }} \
             --subnet-id ${{ secrets.AWS_PUBLIC_SUBNET_ID }} \
+            --associate-public-ip-address \
             --query 'Instances[0].InstanceId' \
             --output text)
 
           echo "EC2 instance $INSTANCE_ID started."
-          echo "INSTANCE_ID: $INSTANCE_ID"
 
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_WORKSPACE/ec2_instance_id.txt
 
       - name: Wait for EC2 Instance to be Running
         run: |
           echo "Waiting for EC2 instance to be running..."
           aws ec2 wait instance-running --instance-ids ${{ env.INSTANCE_ID }}
           echo "EC2 instance is running."
+
+      - name: Commit EC2 Instance ID
+        run: |
+          echo "${{ env.INSTANCE_ID }}" > ec2_instance_id.txt
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add ec2_instance_id.txt
+          git commit -m "Save EC2 Instance ID"
+          git push
 
       - name: Get EC2 Public IP
         id: ec2-ip
@@ -128,34 +155,28 @@ jobs:
             --instance-ids ${{ env.INSTANCE_ID }} \
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
+
+          if [ "$PUBLIC_IP" == "None" ]; then
+            echo "Public IP not available."
+            exit 1
+          fi
+
           echo "EC2 public IP: $PUBLIC_IP"
-
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_WORKSPACE/ec2_public_ip.txt
 
-      - name: Install Docker on EC2
+      - name: Install and Run Docker Container on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key-pair.pem ec2-user@${{ env.PUBLIC_IP }} << EOF
-            sudo yum update -y
-            sudo yum install docker -y
+          app_version="${{ needs.extract-versions.outputs.APP_VERSION }}"
+          dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${app_version}"
 
-            sudo service docker start
-            sudo usermod -aG docker ec2-user
+          sed -i "s|dockerhubtag|$dockerhub_tag|g" install_and_run_docker_image.sh
 
-            dockerhub_tag=$(cat $GITHUB_WORKSPACE/dockerhub_tag.txt)
-            docker pull $dockerhub_tag
-
-          EOF
+          ssh -o SendEnv=DOCKERHUB_TAG -o StrictHostKeyChecking=no -i "${{ secrets.EC2_KEY_PAIR_NAME }}.pem" ec2-user@${{ env.PUBLIC_IP }} < install_and_run_docker_image.sh
 
       - name: Cleanup Key File
         if: always()
         run: |
-          rm -f my-key-pair.pem
-
-      - name: Run Docker Container on EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no -i my-key-pair.pem ec2-user@${{ env.PUBLIC_IP }} << EOF
-          EOF
+          rm -f "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
 
   terminate:
     if: github.event.inputs.action == 'terminate' # Run only if 'terminate' is selected
@@ -169,9 +190,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
 
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Read EC2 Instance ID
         run: |
-          INSTANCE_ID=$(cat $GITHUB_WORKSPACE/ec2_instance_id.txt)
+          INSTANCE_ID=$(cat ec2_instance_id.txt)
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
       - name: Terminate EC2 Instance
