@@ -67,6 +67,7 @@ jobs:
           dockerhub_tag="${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT }}:${app_version}"
           echo "Dockerhub Tag: ${dockerhub_tag}"
           echo "DOCKERHUB_TAG=${dockerhub_tag}" >> "$GITHUB_ENV"
+          echo "DOCKERHUB_TAG=${dockerhub_tag}" >> "$GITHUB_WORKSPACE/dockerhub_tag.txt"
 
       - name: Build and push
         uses: docker/build-push-action@v2
@@ -90,36 +91,56 @@ jobs:
       - name: Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
+
+      - name: Add SSH Key Pair
+        run: |
+          echo "Creating SSH key pair file..."
+
+          echo "${{ secrets.EC2_KEY_PAIR }}" > my-key-pair.pem
+          chmod 400 my-key-pair.pem
+
+          echo "SSH key pair file created."
 
       - name: Start EC2 Instance
         id: ec2
         run: |
+          echo "Starting EC2 instance..."
+
           INSTANCE_ID=$(aws ec2 run-instances \
-            --image-id ami-0c02fb55956c7d316 \
+            --image-id ${{ secrets.AWS_AMI_ID }} \
             --count 1 \
-            --instance-type t2.micro \;p[
+            --instance-type t2.micro \
             --key-name my-key-pair \
-            --security-group-ids sg-0abc12345def67890 \
-            --subnet-id subnet-0abc12345def67890 \
+            --security-group-ids ${{ secrets.AWS_SECURITY_GROUP_ID }} \
+            --subnet-id ${{ secrets.AWS_PUBLIC_SUBNET_ID }} \
             --query 'Instances[0].InstanceId' \
             --output text)
+
+          echo "EC2 instance $INSTANCE_ID started."
+          echo "INSTANCE_ID: $INSTANCE_ID"
+
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_WORKSPACE/ec2_instance_id.txt
 
       - name: Wait for EC2 Instance to be Running
         run: |
+          echo "Waiting for EC2 instance to be running..."
           aws ec2 wait instance-running --instance-ids ${{ env.INSTANCE_ID }}
+          echo "EC2 instance is running."
 
       - name: Get EC2 Public IP
         id: ec2-ip
         run: |
+          echo "Getting EC2 public IP..."
           PUBLIC_IP=$(aws ec2 describe-instances \
             --instance-ids ${{ env.INSTANCE_ID }} \
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
+          echo "EC2 public IP: $PUBLIC_IP"
+
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_WORKSPACE/ec2_public_ip.txt
 
@@ -128,14 +149,23 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i my-key-pair.pem ec2-user@${{ env.PUBLIC_IP }} << EOF
             sudo yum update -y
             sudo yum install docker -y
+
             sudo service docker start
             sudo usermod -aG docker ec2-user
+
+            dockerhub_tag=$(cat $GITHUB_WORKSPACE/dockerhub_tag.txt)
+            docker pull $dockerhub_tag
+
           EOF
+
+      - name: Cleanup Key File
+        if: always()
+        run: |
+          rm -f my-key-pair.pem
 
       - name: Run Docker Container on EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i my-key-pair.pem ec2-user@${{ env.PUBLIC_IP }} << EOF
-            docker run -d --name my-container my-docker-image
           EOF
 
   terminate:
@@ -146,7 +176,7 @@ jobs:
       - name: Configure AWS CLI
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
 
