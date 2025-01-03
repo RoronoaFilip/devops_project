@@ -1,4 +1,4 @@
-import socket
+import os
 
 from flask import Flask
 from flask_wtf import CSRFProtect
@@ -10,8 +10,10 @@ csrf.init_app(app)
 
 @app.route('/')
 def hello_world():
-    hostname = socket.gethostname()
-    return "I am a Flask application running on {}".format(hostname)
+    file_path = os.path.join(os.path.dirname(__file__), 'main.html')
+    with open(file_path, 'r') as file:
+        file_content = file.read()
+    return file_content
 
 
 if __name__ == '__main__':

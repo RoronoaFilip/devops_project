@@ -179,7 +179,7 @@ jobs:
           rm -f "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
 
   terminate:
-    if: github.event.inputs.action == 'terminate' # Run only if 'terminate' is selected
+    if: github.event.inputs.action == 'terminate'
     runs-on: ubuntu-latest
 
     steps:
