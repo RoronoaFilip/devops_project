@@ -16,6 +16,7 @@ on:
 
 jobs:
   extract-versions:
+    if: github.event.inputs.action != 'terminate'
     uses: ./.github/workflows/extract-versions.yml
 
   lint:
