@@ -16,9 +16,11 @@ on:
 
 jobs:
   extract-versions:
+    if: github.event.inputs.action != 'terminate'
     uses: ./.github/workflows/extract-versions.yml
 
   lint:
+    if: github.event.inputs.action != 'terminate' && github.event.inputs.action != 'deploy'
     needs: [ extract-versions ]
     uses: ./.github/workflows/lint.yml
     with:
@@ -89,10 +91,37 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ env.GIT_COMMIT }}
 
+  terminate:
+    if: github.event.inputs.action == 'deploy' || github.event.inputs.action == 'terminate'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Read EC2 Instance ID
+        run: |
+          INSTANCE_ID=$(cat ec2_instance_id.txt)
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+
+      - name: Terminate EC2 Instance
+        run: |
+          aws ec2 terminate-instances --instance-ids ${{ env.INSTANCE_ID }}
+          aws ec2 wait instance-terminated --instance-ids ${{ env.INSTANCE_ID }}
+          echo "EC2 instance ${{ env.INSTANCE_ID }} terminated."
+
   deploy:
     if: github.event.inputs.action == 'deploy' # Run only if 'deploy' is selected
-    needs: [ docker, extract-versions ]
+    needs: [ extract-versions ]
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
 
@@ -181,29 +210,3 @@ jobs:
         if: always()
         run: |
           rm -f "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
-
-  terminate:
-    if: github.event.inputs.action == 'terminate'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Configure AWS CLI
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-north-1
-
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Read EC2 Instance ID
-        run: |
-          INSTANCE_ID=$(cat ec2_instance_id.txt)
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-
-      - name: Terminate EC2 Instance
-        run: |
-          aws ec2 terminate-instances --instance-ids ${{ env.INSTANCE_ID }}
-          aws ec2 wait instance-terminated --instance-ids ${{ env.INSTANCE_ID }}
-          echo "EC2 instance ${{ env.INSTANCE_ID }} terminated."
