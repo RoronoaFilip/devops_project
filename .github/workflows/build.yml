@@ -1,6 +1,12 @@
 name: build
 
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      PYTHON_VERSION:
+        required: true
+        type: string
+        description: "Python version to use"
 
 jobs:
   build:
@@ -13,7 +19,7 @@ jobs:
       - name: Set up Python environment
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ inputs.PYTHON_VERSION }}
 
       - name: Install dependencies
         run: pip install -r src/requirements.txt

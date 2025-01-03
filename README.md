@@ -14,7 +14,8 @@ and managing EC2 instances.
 **Path:** `.github/workflows/extract-versions.yml`
 
 - **Description:**
-  - Extracts application and Python version information.
+  - Extracts application and Python version information from
+  the `project.properties` file.
   - Provides the versions through output variables for use in subsequent jobs.
 - **Trigger:** Skipped if the `terminate` action is selected.
 

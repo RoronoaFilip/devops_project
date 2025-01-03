@@ -1,10 +1,11 @@
-FROM python:3.14.0a1-slim
+FROM python:3.13.1-slim
 
-USER nonroot
+USER root
 
 WORKDIR .
 
-COPY src/ .
+# "." is the src directory. It is the artifact that is being uploaded
+COPY . .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
