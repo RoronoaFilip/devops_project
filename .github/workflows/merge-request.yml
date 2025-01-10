@@ -5,20 +5,30 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
+  extract-versions:
+    uses: ./.github/workflows/extract-versions.yml
+
   lint:
+    needs: [ extract-versions ]
     uses: ./.github/workflows/lint.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
 
   build:
-    needs: [lint]
+    needs: [ lint, extract-versions ]
     uses: ./.github/workflows/build.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
 
   validate-build:
-    needs: [build]
+    needs: [ build, extract-versions ]
     permissions:
       contents: read
       actions: read
 
     uses: ./.github/workflows/validate-build.yml
+    with:
+      PYTHON_VERSION: ${{ needs.extract-versions.outputs.PYTHON_VERSION }}
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

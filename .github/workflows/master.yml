@@ -210,3 +210,8 @@ jobs:
         if: always()
         run: |
           rm -f "${{ secrets.EC2_KEY_PAIR_NAME }}.pem"
+
+
+      - name: Print EC2 Public IP
+        run: |
+          echo "EC2 Public IP: http://${{ env.PUBLIC_IP }}:5000"
